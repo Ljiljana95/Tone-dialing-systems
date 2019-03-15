@@ -1,0 +1,261 @@
+//////////////////////////////////////////////////////////////////////////////
+// *
+// * Predmetni projekat iz predmeta PNRSuOS
+// * Godina: 2018
+// *
+// * Zadatak: Generator DTMF signala
+// * Autor: Popovic Ljiljana EE72/2014
+// *                                                                          
+// *                                                                          
+//////////////////////////////////////////////////////////////////////////////
+
+#include "stdio.h"
+#include "ezdsp5535.h"
+#include "ezdsp5535_i2c.h"
+#include "aic3204.h"
+#include "ezdsp5535_aic3204_dma.h"
+#include "ezdsp5535_i2s.h"
+#include "ezdsp5535_sar.h"
+#include "print_number.h"
+#include "gen_sinus.h"
+#include "math.h"
+#include "sine_table.h"
+#include "Dsplib.h"
+
+
+
+/* Frekvencija odabiranja */
+#define SAMPLE_RATE 8000L
+
+#define PI 3.14159265
+
+/* Niz za smestanje izlaznih odbiraka */
+#pragma DATA_ALIGN(OutputBuffer,4)
+Int16 OutputBuffer[AUDIO_IO_SIZE];
+Int16 OutputBuffer1[AUDIO_IO_SIZE];//levi
+Int16 OutputBuffer2[AUDIO_IO_SIZE];//desni
+//Int16 OutputBufferS[AUDIO_IO_SIZE]; //suma
+Int16 noise[AUDIO_IO_SIZE]; //shum
+
+		float ph1,ph2,fh,fl;
+		char n; //koji karakter je upisan
+		int br=0;
+		Uint16 taster = NoKey;
+		float SNR;
+		Int16 P_signala=0;
+		Int16 P_suma=0;
+
+void main( void )
+{   
+		int i,j;
+
+    /* Inicijalizaija razvojne ploce */
+    EZDSP5535_init( );
+
+    /* Inicijalizacija kontrolera za ocitavanje vrednosti pritisnutog dugmeta*/
+    EZDSP5535_SAR_init();
+
+    /* Inicijalizacija LCD kontrolera */
+    initPrintNumber();
+
+	printf("\n DTMF Predajnik\n");
+
+    /* Inicijalizacija veze sa AIC3204 kodekom (AD/DA) */
+    aic3204_hardware_init();
+
+    /* Inicijalizacija AIC3204 kodeka */
+	aic3204_init();
+    aic3204_dma_init();
+
+    /* Postavljanje vrednosti frekvencije odabiranja i pojacanja na kodeku */
+    set_sampling_frequency_and_gain(SAMPLE_RATE, 0);
+
+    while(1){
+		while(taster != SW2){
+
+			taster=EZDSP5535_SAR_getKey();
+
+			if(taster == SW1){
+				br++;
+
+				if(br >= 17){
+					br = 0;
+				}
+			}
+
+		}
+		while(taster == SW2)
+		{
+			/* Popunjavanje DMA bafera sa nulama (Ping i Pong) kako bi na izlazu bila emitovana tisina */
+			for(j=0; j < AUDIO_IO_SIZE; j++)
+			{
+				OutputBuffer[j] = 0;
+				OutputBuffer1[j] = 0;
+				OutputBuffer2[j] = 0;
+				noise[j] = 0;
+
+			}
+			/* TODO : geresiati DTMF tonove u zavisnosti od odabranog na */
+				switch (br)
+				{
+					case 1:
+							n='1';
+							break;
+					case 2:
+							n='2';
+							break;
+					case 3:
+							n='3';
+							break;
+					case 4:
+							n='4';
+							break;
+					case 5:
+							n='5';
+							break;
+					case 6:
+							n='6';
+							break;
+					case 7:
+							n='7';
+							break;
+					case 8:
+							n='8';
+							break;
+					case 9:
+							n='9';
+							break;
+					case 10:
+							n='0';
+							break;
+					case 11:
+							n='A';
+							break;
+					case 12:
+							n='B';
+							break;
+					case 13:
+							n='C';
+							break;
+					case 14:
+							n='D';
+							break;
+					case 15:
+							n='*';
+							break;
+					case 16:
+							n='#';
+							break;
+					default :
+							n= 'M';
+							break;
+				}
+			//n = '*';
+			switch(n)
+			{
+						case '0':
+							fl = 1200.0;
+							fh = 2000.0;
+							break;
+						case '1':
+							fl = 960.0;
+							fh = 1400.0;
+							break;
+						case '2':
+							fl = 960.0;
+							fh = 2000.0;
+							break;
+						case '3':
+							fl = 960.0;
+							fh = 2160.0;
+							break;
+						case '4':
+							fl = 1040.0;
+							fh = 1400.0;
+							break;
+						case '5':
+							fl = 1040.0;
+							fh = 2000.0;
+							break;
+						case '6':
+							fl = 1040.0;
+							fh = 2160.0;
+							break;
+						case '7':
+							fl = 1120.0;
+							fh = 1400.0;
+							break;
+						case '8':
+							fl = 1120.0;
+							fh = 2000.0;
+							break;
+						case '9':
+							fl = 1120.0;
+							fh = 2160.0;
+							break;
+						case 'A':
+							fl = 960.0;
+							fh = 2320.0;
+							break;
+						case 'B':
+							fl = 1040.0;
+							fh = 2320.0;
+							break;
+						case 'C':
+							fl = 1120.0;
+							fh = 2320.0;
+							break;
+						case 'D':
+							fl = 1200.0;
+							fh = 2320.0;
+							break;
+						case '*':
+							fl = 1200.0;
+							fh = 1400.0;
+							break;
+						case '#':
+							fl = 1200.0;
+							fh = 2160.0;
+							break;
+						default:
+							break;
+			}
+
+				ph1 = fmod(AUDIO_IO_SIZE*2*PI*fl/SAMPLE_RATE,2*PI);
+				gen_sinus_table(AUDIO_IO_SIZE, 16000, fl/SAMPLE_RATE,ph1,OutputBuffer1);
+
+				ph2 = fmod(AUDIO_IO_SIZE*2*PI*fh/SAMPLE_RATE,2*PI);
+				gen_sinus_table(AUDIO_IO_SIZE, 16000, fh/SAMPLE_RATE,ph2,OutputBuffer2);
+
+				for(j = 0; j < AUDIO_IO_SIZE; j++){
+					OutputBuffer[j] = OutputBuffer1[j] + OutputBuffer2[j];
+				}
+
+				taster=EZDSP5535_SAR_getKey();
+				br=0;
+
+				//sum
+				/*
+				rand16init();
+
+				rand16(noise,AUDIO_IO_SIZE);
+
+				for(j = 0; j < AUDIO_IO_SIZE; j++){
+					P_signala = P_signala + _smpy(OutputBuffer[k],OutputBuffer[k]);//treba j a ne k
+
+				for(j = 0; j < AUDIO_IO_SIZE; j++){
+					P_suma = P_suma + _smpy(noise[k],noise[k]);
+				}
+
+				SNR=10*log10((float)P_signala/(float)P_suma);
+
+				 */
+				aic3204_write_block(OutputBuffer, OutputBuffer);
+			}
+    }
+	/* Prekid veze sa AIC3204 kodekom */
+    aic3204_disable();
+
+    printf( "\n***Kraj programa***\n" );
+	SW_BREAKPOINT;
+}
